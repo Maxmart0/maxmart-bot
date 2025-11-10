@@ -1,6 +1,6 @@
 import os
 import json
-import threading
+import asyncio
 from datetime import datetime
 
 import discord
@@ -22,7 +22,7 @@ DATAFILE = "ordini.json"
 
 # --------- Discord intents / bot ----------
 intents = discord.Intents.default()
-intents.message_content = True   # attivalo anche nel Developer Portal (Bot -> Privileged Gateway Intents)
+intents.message_content = True   # attivalo anche nel Developer Portal
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 STATI = {
@@ -100,7 +100,7 @@ def save_db(db_obj):
     with open(DATAFILE, "w", encoding="utf-8") as f:
         json.dump(db_obj, f, ensure_ascii=False, indent=2)
 
-db = load_db()  # { order_id: {"stato": "🆕", "dettagli": "...", "messages":[{"channel_id":int,"message_id":int}]} }
+db = load_db()
 
 def is_order_message(content: str) -> bool:
     return content and "**Checklist:**" in content
@@ -231,20 +231,30 @@ async def on_reaction_add(reaction, user):
 async def handle(request):
     return web.Response(text="Bot MaxMart attivo ✅")
 
-def run_web():
-    # Avvio di un micro-server aiohttp su thread dedicato, senza signal handlers
-    import asyncio
+async def start_web_app():
     app = web.Application()
     app.add_routes([web.get("/", handle)])
     port = int(os.getenv("PORT", "10000"))
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    web.run_app(app, host="0.0.0.0", port=port, handle_signals=False)
+    runner = web.AppRunner(app, handle_signals=False)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"🌐 Web server attivo su 0.0.0.0:{port}")
+    return runner
 
-threading.Thread(target=run_web, daemon=True).start()
+async def main():
+    if not TOKEN:
+        print("❌ ERRORE: variabile d'ambiente TOKEN mancante. Imposta TOKEN su Render (Environment).")
+        return
 
-# ---------------- Avvio del bot ----------------
-if not TOKEN:
-    print("❌ ERRORE: variabile d'ambiente TOKEN mancante. Imposta TOKEN su Render (Environment).")
-else:
-    bot.run(TOKEN)
+    # 1) Avvia prima il web server (Render deve vedere la porta aperta)
+    runner = await start_web_app()
+
+    # 2) Avvia il bot Discord nello stesso event loop
+    try:
+        await bot.start(TOKEN)
+    finally:
+        await runner.cleanup()
+
+if __name__ == "__main__":
+    asyncio.run(main())
