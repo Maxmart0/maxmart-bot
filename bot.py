@@ -8,7 +8,7 @@ from discord.ext import commands
 from aiohttp import web
 
 # ================== CONFIG ==================
-TOKEN = os.getenv("TOKEN")  # imposta su Render: Environment -> Add Variable (Key=TOKEN, Value=tuo token)
+TOKEN = os.getenv("TOKEN")  # su Render: Environment -> add variable TOKEN = <tuo token>
 
 # ID CANALI (i tuoi)
 ID_ORDINI_FORNITORI   = 1437442516017479750  # #ordini-da-fare-ai-fornitori
@@ -23,7 +23,6 @@ DATAFILE = "ordini.json"
 # --------- Discord intents / bot ----------
 intents = discord.Intents.default()
 intents.message_content = True   # attivalo anche nel Developer Portal (Bot -> Privileged Gateway Intents)
-
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 STATI = {
@@ -183,7 +182,6 @@ async def on_ready():
 
 @bot.command(name="nuovo")
 async def nuovo(ctx, order_id: str, *, dettagli: str):
-    # Crea la prima copia nel canale dove scrivi il comando
     stato = "🆕"
     content = render(order_id, dettagli, stato)
     msg = await ctx.send(content)
@@ -197,7 +195,6 @@ async def nuovo(ctx, order_id: str, *, dettagli: str):
     db[order_id] = record
     save_db(db)
 
-    # Assicura anche la copia nel canale di fase corrente
     await ensure_copy_in_phase_channel(order_id, dettagli, stato)
 
 @bot.event
@@ -206,13 +203,11 @@ async def on_reaction_add(reaction, user):
         return
     msg = reaction.message
     emoji = str(reaction.emoji)
-
     if not is_order_message(msg.content):
         return
     if emoji not in STATI:
         return
 
-    # Prima riga: "EMOJI **ORD-...**"
     first = msg.content.splitlines()[0].strip()
     if "**" not in first:
         return
@@ -221,7 +216,6 @@ async def on_reaction_add(reaction, user):
     except Exception:
         return
 
-    # Dettagli = righe tra la seconda riga e "Stato attuale"
     lines = msg.content.splitlines()
     dettagli_lines = []
     for line in lines[1:]:
@@ -234,18 +228,19 @@ async def on_reaction_add(reaction, user):
     await update_all_copies(order_id, dettagli, emoji)
 
 # ---------------- Keep-Alive HTTP (Render Free) ---------------
-# Render Free Web Service richiede che l'app "ascolti" su una porta ($PORT).
-# Avviamo un micro-server aiohttp su un thread dedicato così il bot resta attivo.
 async def handle(request):
     return web.Response(text="Bot MaxMart attivo ✅")
 
 def run_web():
+    # Avvio di un micro-server aiohttp su thread dedicato, senza signal handlers
+    import asyncio
     app = web.Application()
     app.add_routes([web.get("/", handle)])
-    port = int(os.getenv("PORT", "10000"))  # Render passa $PORT; fallback 10000
-    web.run_app(app, host="0.0.0.0", port=port)
+    port = int(os.getenv("PORT", "10000"))
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    web.run_app(app, host="0.0.0.0", port=port, handle_signals=False)
 
-# Avvio del micro-server HTTP in parallelo
 threading.Thread(target=run_web, daemon=True).start()
 
 # ---------------- Avvio del bot ----------------
