@@ -22,7 +22,11 @@ DATAFILE = "ordini.json"
 
 # --------- Discord intents / bot ----------
 intents = discord.Intents.default()
-intents.message_content = True   # attivalo anche nel Developer Portal
+intents.message_content = True   # abilitato anche nel Developer Portal
+intents.messages = True
+intents.reactions = True
+intents.guilds = True
+
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 STATI = {
@@ -137,12 +141,14 @@ async def ensure_copy_in_phase_channel(order_id: str, dettagli: str, stato_emoji
     else:
         msg = await channel.send(content)
 
+    # aggiunge le reazioni di stato sul messaggio “di fase”
     for e in ["📤", "📦", "🚚", "✅", "⚠️", "❌"]:
         try:
             await msg.add_reaction(e)
         except Exception:
             pass
 
+    # aggiorna il record
     updated = False
     for m in record["messages"]:
         if m["channel_id"] == channel_id:
@@ -178,7 +184,7 @@ async def update_all_copies(order_id: str, dettagli: str, stato_emoji: str):
 # ----------------- Events/commands -----------------
 @bot.event
 async def on_ready():
-    print(f"✅ Bot avviato come {bot.user}")
+    print(f"✅ Bot avviato come {bot.user} (latency: {bot.latency})")
 
 @bot.command(name="nuovo")
 async def nuovo(ctx, order_id: str, *, dettagli: str):
@@ -197,18 +203,45 @@ async def nuovo(ctx, order_id: str, *, dettagli: str):
 
     await ensure_copy_in_phase_channel(order_id, dettagli, stato)
 
+# --------- NUOVO HANDLER: funziona anche sui messaggi vecchi ---------
 @bot.event
-async def on_reaction_add(reaction, user):
-    if user.bot:
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    """Gestisce i cambi di stato anche su messaggi vecchi (non in cache)."""
+    # ignora le reazioni del bot stesso
+    if bot.user is None:
         return
-    msg = reaction.message
-    emoji = str(reaction.emoji)
-    if not is_order_message(msg.content):
+    if payload.user_id == bot.user.id:
         return
+
+    emoji = str(payload.emoji)
+
+    # consideriamo solo le emoji di stato
     if emoji not in STATI:
         return
 
-    first = msg.content.splitlines()[0].strip()
+    # recupera canale e messaggio
+    channel = bot.get_channel(payload.channel_id) or await bot.fetch_channel(payload.channel_id)
+    try:
+        msg = await channel.fetch_message(payload.message_id)
+    except discord.NotFound:
+        return
+    except Exception as e:
+        print("Errore fetch message:", e)
+        return
+
+    # consideriamo solo i messaggi creati dal bot (gli ordini)
+    if msg.author.id != bot.user.id:
+        return
+
+    content = msg.content or ""
+    if not is_order_message(content):
+        return
+
+    # debug leggero
+    print(f"🔥 Reazione {emoji} su msg {msg.id} nel canale {channel.id}")
+
+    # prima riga: contiene l'ID ordine
+    first = content.splitlines()[0].strip()
     if "**" not in first:
         return
     try:
@@ -216,7 +249,8 @@ async def on_reaction_add(reaction, user):
     except Exception:
         return
 
-    lines = msg.content.splitlines()
+    # estraiamo i dettagli (fino a **Stato attuale:**)
+    lines = content.splitlines()
     dettagli_lines = []
     for line in lines[1:]:
         if line.startswith("**Stato attuale:**"):
