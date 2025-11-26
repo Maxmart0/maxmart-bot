@@ -258,6 +258,20 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         dettagli_lines.append(line)
     dettagli = "\n".join(dettagli_lines).strip()
 
+    # 👇 AGGANCIA ANCHE IL MESSAGGIO CORRENTE AL RECORD DELL'ORDINE
+    record = db.get(order_id, {"stato": "🆕", "messages": [], "dettagli": dettagli})
+    found_current = False
+    for m in record.get("messages", []):
+        if m["channel_id"] == channel.id and m["message_id"] == msg.id:
+            found_current = True
+            break
+    if not found_current:
+        record.setdefault("messages", []).append({"channel_id": channel.id, "message_id": msg.id})
+    record["dettagli"] = dettagli
+    db[order_id] = record
+    save_db(db)
+
+    # crea/aggiorna la copia nel canale di fase e poi aggiorna tutte le copie
     await ensure_copy_in_phase_channel(order_id, dettagli, emoji)
     await update_all_copies(order_id, dettagli, emoji)
 
