@@ -203,7 +203,7 @@ async def nuovo(ctx, order_id: str, *, dettagli: str):
 
     await ensure_copy_in_phase_channel(order_id, dettagli, stato)
 
-# --------- NUOVO HANDLER: funziona anche sui messaggi vecchi ---------
+# --------- HANDLER REAZIONI (funziona anche sui messaggi vecchi) ---------
 @bot.event
 async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     """Gestisce i cambi di stato anche su messaggi vecchi (non in cache)."""
@@ -290,6 +290,25 @@ async def start_web_app():
     print(f"🌐 Web server attivo su 0.0.0.0:{port}")
     return runner
 
+# --------- LOOP DI RIAVVIO DEL BOT DISCORD ---------
+async def run_bot_loop():
+    """Tenta di avviare il bot Discord in loop.
+    Se Discord dà errori temporanei, il bot si riavvia da solo.
+    Se il TOKEN è sbagliato, interrompe il loop e stampa un messaggio chiaro.
+    """
+    while True:
+        try:
+            print("▶️ Avvio bot Discord...")
+            await bot.start(TOKEN)
+        except discord.LoginFailure:
+            # TOKEN errato: qui non ha senso continuare a riavviare
+            print("❌ TOKEN Discord non valido. Controlla la variabile TOKEN su Render.")
+            break
+        except Exception as e:
+            # qualsiasi altro errore: aspetta 5 secondi e riprova
+            print(f"⚠️ Errore nel bot: {e!r}. Riavvio tra 5 secondi...")
+            await asyncio.sleep(5)
+
 async def main():
     if not TOKEN:
         print("❌ ERRORE: variabile d'ambiente TOKEN mancante. Imposta TOKEN su Render (Environment).")
@@ -298,9 +317,9 @@ async def main():
     # 1) Avvia prima il web server (Render deve vedere la porta aperta)
     runner = await start_web_app()
 
-    # 2) Avvia il bot Discord nello stesso event loop
+    # 2) Avvia il bot Discord in loop di riavvio
     try:
-        await bot.start(TOKEN)
+        await run_bot_loop()
     finally:
         await runner.cleanup()
 
